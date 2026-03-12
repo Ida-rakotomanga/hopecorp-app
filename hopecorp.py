@@ -16,18 +16,14 @@ standards = {
         "42 (M/L)": {"Poitrine": 96, "Taille": 78, "Bassin": 102},
         "44 (L)":   {"Poitrine": 100, "Taille": 82, "Bassin": 106},
         "46 (XL)":  {"Poitrine": 104, "Taille": 86, "Bassin": 110},
-        "48 (XXL)": {"Poitrine": 110, "Taille": 92, "Bassin": 116},
-        "50 (3XL)": {"Poitrine": 116, "Taille": 98, "Bassin": 122},
-        "52 (4XL)": {"Poitrine": 122, "Taille": 104, "Bassin": 128}
+        "48 (XXL)": {"Poitrine": 110, "Taille": 92, "Bassin": 116}
     },
     "Homme": {
         "44 (XS)": {"Poitrine": 88, "Taille": 76},
         "46 (S)":  {"Poitrine": 92, "Taille": 80},
         "48 (M)":  {"Poitrine": 96, "Taille": 84},
         "50 (M/L)":{"Poitrine": 100, "Taille": 88},
-        "52 (L)":  {"Poitrine": 104, "Taille": 92},
-        "54 (XL)": {"Poitrine": 108, "Taille": 96},
-        "56 (XXL)":{"Poitrine": 112, "Taille": 100}
+        "52 (L)":  {"Poitrine": 104, "Taille": 92}
     }
 }
 
@@ -40,35 +36,29 @@ metrage_base = {
     "Chemise/Chemisier": 2.0
 }
 
-# --- TES CATÉGORIES ---
+# --- CATÉGORIES ---
 categories = {
     "IDENTITE": ["Nom Complet", "Date de mesure", "Notes"],
-    "1. LES TOURS": [
-        "Tour de cou", "Tour de poitrine", "Dessous de poitrine", 
-        "Tour de taille", "Petites hanches", "Bassin (Gdes hanches)", 
-        "Tour de bras", "Tour de poignet", "Tour de cuisse"
-    ],
-    "2. LES LONGUEURS": [
-        "Hauteur totale", "Epaule-taille (Dev)", "Hauteur poitrine", 
-        "Hauteur hanches", "Jambe (Ext)", "Jambe (Int)", "Longueur de bras"
-    ],
-    "3. SPECIFIQUES": [
-        "Largeur epaule", "Carrure devant", "Carrure dos", 
-        "Ecartement poitrine", "Enfourchure"
-    ],
+    "1. LES TOURS": ["Tour de cou", "Tour de poitrine", "Tour de taille", "Bassin (Gdes hanches)", "Tour de bras", "Tour de cuisse"],
+    "2. LES LONGUEURS": ["Hauteur totale", "Epaule-taille", "Hauteur poitrine", "Jambe (Ext)", "Longueur de bras"],
+    "3. SPECIFIQUES": ["Largeur epaule", "Carrure devant", "Carrure dos", "Enfourchure"],
     "4. PROJET (Photo/Tissu)": []
 }
 
-# Initialisation propre des données
+# --- INITIALISATION SÉCURISÉE ---
 if "data" not in st.session_state:
     st.session_state.data = {}
-    for cat_list in categories.values():
-        for m in cat_list:
+
+# On s'assure que toutes les clés existent pour éviter les KeyError
+for cat_list in categories.values():
+    for m in cat_list:
+        if m not in st.session_state.data:
             st.session_state.data[m] = 0.0
-    st.session_state.data["Nom Complet"] = ""
-    st.session_state.data["Notes"] = ""
-    st.session_state.data["Date de mesure"] = datetime.date.today()
-    st.session_state.data["image_modele"] = None
+
+if "Nom Complet" not in st.session_state.data: st.session_state.data["Nom Complet"] = ""
+if "Notes" not in st.session_state.data: st.session_state.data["Notes"] = ""
+if "Date de mesure" not in st.session_state.data: st.session_state.data["Date de mesure"] = datetime.date.today()
+if "image_modele" not in st.session_state.data: st.session_state.data["image_modele"] = None
 
 # --- INTERFACE ---
 st.title("🧵 HOPECORP")
@@ -78,21 +68,20 @@ st.header(page)
 
 if page == "4. PROJET (Photo/Tissu)":
     st.subheader("📸 Modèle")
-    uploaded_file = st.file_uploader("Prendre une photo ou charger un modèle", type=["jpg", "jpeg", "png"])
+    uploaded_file = st.file_uploader("Prendre une photo", type=["jpg", "png", "jpeg"])
     if uploaded_file:
         st.session_state.data["image_modele"] = uploaded_file.read()
     
-    if st.session_state.data["image_modele"]:
+    if st.session_state.data.get("image_modele") is not None:
         st.image(st.session_state.data["image_modele"], width=300)
 
     st.divider()
-    st.subheader("📏 Calculateur de Tissu")
-    choix = st.selectbox("Type de vêtement", list(metrage_base.keys()))
-    laize = st.select_slider("Laize du tissu (cm)", options=[90, 110, 140, 150], value=140)
-    
+    st.subheader("📏 Métrage")
+    choix = st.selectbox("Vêtement", list(metrage_base.keys()))
+    laize = st.select_slider("Laize (cm)", options=[90, 110, 140, 150], value=140)
     besoin = metrage_base[choix]
     if laize < 130: besoin *= 1.3
-    st.metric("Tissu à prévoir", f"{besoin:.1f} mètres")
+    st.metric("Tissu estimé", f"{besoin:.1f} m")
 
 else:
     for label in categories[page]:
@@ -103,12 +92,15 @@ else:
         elif label == "Nom Complet":
             st.session_state.data[label] = st.text_input(label, value=st.session_state.data[label])
         else:
-            # Sécurité pour les nombres
-            val_actuelle = st.session_state.data.get(label, 0.0)
-            if not isinstance(val_actuelle, (int, float)): val_actuelle = 0.0
-            st.session_state.data[label] = st.number_input(label, min_value=0.0, value=float(val_actuelle), step=0.5)
+            val = st.session_state.data.get(label, 0.0)
+            # Conversion forcée en float pour éviter les bugs
+            try:
+                val_float = float(val)
+            except:
+                val_float = 0.0
+            st.session_state.data[label] = st.number_input(label, min_value=0.0, value=val_float, step=0.5)
 
-# --- ANALYSE DE TAILLE (Sidebar) ---
+# --- SIDEBAR ANALYSE ---
 st.sidebar.divider()
 genre = st.sidebar.selectbox("Référence", list(standards.keys()))
 p = st.session_state.data.get("Tour de poitrine", 0.0)
@@ -116,16 +108,16 @@ t = st.session_state.data.get("Tour de taille", 0.0)
 
 if isinstance(p, (int, float)) and p > 40:
     tab = standards[genre]
-    meilleure, score = "", 1000
-    for nom, m in tab.items():
-        diff = abs(p - m["Poitrine"]) + abs(t - m["Taille"])
-        if diff < score: score, meilleure = diff, nom
-    st.sidebar.success(f"Taille recommandée : {meilleure}")
+    best_t, score = "", 1000
+    for n, m in tab.items():
+        d = abs(p - m["Poitrine"]) + abs(t - m["Taille"])
+        if d < score: score, best_t = d, n
+    st.sidebar.success(f"Taille : {best_t}")
 
 # --- EXPORT ---
-st.divider()
-if st.button("💾 Préparer la fiche pour téléchargement"):
-    fiche = f"HOPECORP - {st.session_state.data['Nom Complet']}\n" + "-"*20 + "\n"
+st.sidebar.divider()
+if st.sidebar.button("📥 Générer Fiche"):
+    txt = f"HOPECORP - {st.session_state.data['Nom Complet']}\n" + "="*20 + "\n"
     for k, v in st.session_state.data.items():
-        if k != "image_modele": fiche += f"{k}: {v}\n"
-    st.download_button("⬇️ Télécharger maintenant", fiche, f"Fiche_{st.session_state.data['Nom Complet']}.txt")
+        if k != "image_modele": txt += f"{k}: {v}\n"
+    st.download_button("Cliquez pour télécharger", txt, "fiche.txt")
