@@ -5,7 +5,7 @@ from fpdf import FPDF
 # Configuration
 st.set_page_config(page_title="HOPECORP - Mesures Pro", layout="centered", page_icon="🧵")
 
-# --- CATÉGORIES DÉTAILLÉES ---
+# --- TOUTES LES MESURES DÉTAILLÉES ---
 categories = {
     "IDENTITE": ["Nom Complet", "Date de mesure", "Notes"],
     "1. LES TOURS": [
@@ -23,39 +23,48 @@ categories = {
         "Carrure devant", "Carrure dos", "Largeur dos", 
         "Largeur d'épaule à épaule", "Profondeur d'encolure"
     ],
-    "4. PROJET (Photo/Tissu)": []
+    "4. PROJET": ["Type de vêtement", "Métrage estimé (m)", "Laize tissu (cm)"]
 }
 
-# --- INITIALISATION ---
+# --- INITIALISATION & NETTOYAGE CRITIQUE ---
 if "data" not in st.session_state:
     st.session_state.data = {}
 
-for cat_list in categories.values():
-    for m in cat_list:
-        if m not in st.session_state.data:
-            st.session_state.data[m] = 0.0 if m not in ["Nom Complet", "Notes"] else ""
-
-if not isinstance(st.session_state.data.get("Date de mesure"), datetime.date):
-    st.session_state.data["Date de mesure"] = datetime.date.today()
+# Cette boucle répare les erreurs de type (ex: du texte là où on veut un chiffre)
+for cat, items in categories.items():
+    for item in items:
+        if item not in st.session_state.data:
+            if item in ["Nom Complet", "Notes", "Type de vêtement"]:
+                st.session_state.data[item] = ""
+            elif item == "Date de mesure":
+                st.session_state.data[item] = datetime.date.today()
+            else:
+                st.session_state.data[item] = 0.0
+        else:
+            # Vérification de sécurité pour éviter les plantages st.number_input
+            if item not in ["Nom Complet", "Notes", "Date de mesure", "Type de vêtement"]:
+                try:
+                    st.session_state.data[item] = float(st.session_state.data[item])
+                except:
+                    st.session_state.data[item] = 0.0
 
 # --- INTERFACE ---
 st.title("🧵 HOPECORP")
 page = st.sidebar.radio("Navigation", list(categories.keys()))
 st.header(page)
 
-if page == "4. PROJET (Photo/Tissu)":
-    st.info("Section dédiée au suivi du modèle et métrage.")
-else:
-    for label in categories[page]:
-        if label == "Date de mesure":
-            st.session_state.data[label] = st.date_input(label, value=st.session_state.data[label])
-        elif label in ["Notes", "Nom Complet"]:
-            st.session_state.data[label] = st.text_input(label, value=str(st.session_state.data.get(label, "")))
-        else:
-            val = st.session_state.data.get(label, 0.0)
-            st.session_state.data[label] = st.number_input(label, min_value=0.0, value=float(val), step=0.5)
+# Formulaire dynamique
+for label in categories[page]:
+    if label == "Date de mesure":
+        st.session_state.data[label] = st.date_input(label, value=st.session_state.data[label])
+    elif label in ["Notes", "Nom Complet", "Type de vêtement"]:
+        st.session_state.data[label] = st.text_input(label, value=str(st.session_state.data[label]))
+    else:
+        # number_input est très sensible : on s'assure que value est bien un float
+        val_actuelle = float(st.session_state.data.get(label, 0.0))
+        st.session_state.data[label] = st.number_input(label, min_value=0.0, value=val_actuelle, step=0.5)
 
-# --- GÉNÉRATEUR PDF ---
+# --- GÉNÉRATEUR PDF (SANS ERREUR) ---
 def generate_pdf(data):
     try:
         pdf = FPDF()
@@ -65,22 +74,31 @@ def generate_pdf(data):
         pdf.ln(5)
         
         pdf.set_font("Arial", "B", 11)
-        pdf.cell(0, 10, f"CLIENT : {str(data.get('Nom Complet', '-'))}", ln=True)
-        pdf.cell(0, 10, f"DATE : {str(data.get('Date de mesure', '-'))}", ln=True)
-        pdf.ln(3)
+        pdf.cell(0, 8, f"CLIENT : {str(data.get('Nom Complet', '-'))}", ln=True)
+        pdf.cell(0, 8, f"DATE : {str(data.get('Date de mesure', '-'))}", ln=True)
+        pdf.ln(5)
         
-        pdf.set_font("Arial", "", 9)
-        # Organisation par colonnes pour ne pas avoir un PDF trop long
+        pdf.set_font("Arial", "", 10)
         for k, v in data.items():
-            if k not in ["Nom Complet", "Date de mesure", "image_modele"]:
-                valeur = str(v) if v not in [0.0, "", 0] else "-"
-                pdf.cell(80, 7, f"{str(k)}", border=1)
-                pdf.cell(30, 7, f"{valeur} cm" if v not in [0.0, "", 0] else "-", border=1, ln=True)
+            if k not in ["Nom Complet", "Date de mesure"]:
+                # Affichage propre des mesures remplies
+                txt_v = str(v) if v not in [0.0, "", 0] else "-"
+                pdf.cell(90, 7, f"{str(k)}", border=1)
+                pdf.cell(40, 7, f"{txt_v}", border=1, ln=True)
         return pdf.output()
-    except: return None
+    except:
+        return None
 
-# --- BOUTON PDF ---
+# --- BOUTON DE TÉLÉCHARGEMENT ---
 st.sidebar.divider()
-pdf_file = generate_pdf(st.session_state.data)
-if pdf_file:
-    st.sidebar.download_button("📥 Télécharger PDF Complet", data=bytes(pdf_file), file_name="Fiche_Mesures.pdf", mime="application/pdf")
+try:
+    pdf_out = generate_pdf(st.session_state.data)
+    if pdf_out:
+        st.sidebar.download_button(
+            "📥 Télécharger PDF", 
+            data=bytes(pdf_out), 
+            file_name=f"Fiche_{st.session_state.data['Nom Complet']}.pdf", 
+            mime="application/pdf"
+        )
+except:
+    st.sidebar.warning("Remplissez le nom pour le PDF")
