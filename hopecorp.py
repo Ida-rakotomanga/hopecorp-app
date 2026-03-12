@@ -1,8 +1,10 @@
 import streamlit as st
 import datetime
+from PIL import Image
+import io
 
 # Configuration pour smartphone
-st.set_page_config(page_title="HOPECORP", layout="centered")
+st.set_page_config(page_title="HOPECORP", layout="centered", page_icon="🧵")
 
 # --- DONNÉES DE RÉFÉRENCE ---
 standards = {
@@ -29,7 +31,16 @@ standards = {
     }
 }
 
-# --- TES CATÉGORIES DE MESURES ---
+metrage_base = {
+    "Robe simple": 2.5,
+    "Robe de soirée": 4.0,
+    "Jupe": 1.5,
+    "Pantalon": 2.0,
+    "Veste/Blazer": 2.5,
+    "Chemise/Chemisier": 2.0
+}
+
+# --- TES CATÉGORIES ---
 categories = {
     "IDENTITE": ["Nom Complet", "Date de mesure", "Notes"],
     "1. LES TOURS": [
@@ -44,55 +55,77 @@ categories = {
     "3. SPECIFIQUES": [
         "Largeur epaule", "Carrure devant", "Carrure dos", 
         "Ecartement poitrine", "Enfourchure"
-    ]
+    ],
+    "4. PROJET (Photo/Tissu)": []
 }
 
-# Initialisation des données
+# Initialisation propre des données
 if "data" not in st.session_state:
-    st.session_state.data = {m: 0.0 for cat in categories.values() for m in cat}
+    st.session_state.data = {}
+    for cat_list in categories.values():
+        for m in cat_list:
+            st.session_state.data[m] = 0.0
     st.session_state.data["Nom Complet"] = ""
     st.session_state.data["Notes"] = ""
     st.session_state.data["Date de mesure"] = datetime.date.today()
+    st.session_state.data["image_modele"] = None
 
 # --- INTERFACE ---
 st.title("🧵 HOPECORP")
 page = st.sidebar.radio("Navigation", list(categories.keys()))
 
 st.header(page)
-for label in categories[page]:
-    if label == "Date de mesure":
-        st.session_state.data[label] = st.date_input(label, value=st.session_state.data[label])
-    elif label == "Notes":
-        st.session_state.data[label] = st.text_area(label, value=st.session_state.data[label])
-    elif label == "Nom Complet":
-        st.session_state.data[label] = st.text_input(label, value=st.session_state.data[label])
-    else:
-        st.session_state.data[label] = st.number_input(label, min_value=0.0, value=float(st.session_state.data.get(label, 0.0)), step=0.5)
 
-# --- ANALYSE DE TAILLE (CORRIGÉE) ---
+if page == "4. PROJET (Photo/Tissu)":
+    st.subheader("📸 Modèle")
+    uploaded_file = st.file_uploader("Prendre une photo ou charger un modèle", type=["jpg", "jpeg", "png"])
+    if uploaded_file:
+        st.session_state.data["image_modele"] = uploaded_file.read()
+    
+    if st.session_state.data["image_modele"]:
+        st.image(st.session_state.data["image_modele"], width=300)
+
+    st.divider()
+    st.subheader("📏 Calculateur de Tissu")
+    choix = st.selectbox("Type de vêtement", list(metrage_base.keys()))
+    laize = st.select_slider("Laize du tissu (cm)", options=[90, 110, 140, 150], value=140)
+    
+    besoin = metrage_base[choix]
+    if laize < 130: besoin *= 1.3
+    st.metric("Tissu à prévoir", f"{besoin:.1f} mètres")
+
+else:
+    for label in categories[page]:
+        if label == "Date de mesure":
+            st.session_state.data[label] = st.date_input(label, value=st.session_state.data[label])
+        elif label == "Notes":
+            st.session_state.data[label] = st.text_area(label, value=st.session_state.data[label])
+        elif label == "Nom Complet":
+            st.session_state.data[label] = st.text_input(label, value=st.session_state.data[label])
+        else:
+            # Sécurité pour les nombres
+            val_actuelle = st.session_state.data.get(label, 0.0)
+            if not isinstance(val_actuelle, (int, float)): val_actuelle = 0.0
+            st.session_state.data[label] = st.number_input(label, min_value=0.0, value=float(val_actuelle), step=0.5)
+
+# --- ANALYSE DE TAILLE (Sidebar) ---
 st.sidebar.divider()
-genre = st.sidebar.selectbox("Genre de référence", list(standards.keys()))
-
-# Récupération sécurisée des valeurs
+genre = st.sidebar.selectbox("Référence", list(standards.keys()))
 p = st.session_state.data.get("Tour de poitrine", 0.0)
 t = st.session_state.data.get("Tour de taille", 0.0)
-b = st.session_state.data.get("Bassin (Gdes hanches)", 0.0)
 
 if isinstance(p, (int, float)) and p > 40:
     tab = standards[genre]
-    meilleure, score_mini = "", 1000
-    for nom_t, m in tab.items():
+    meilleure, score = "", 1000
+    for nom, m in tab.items():
         diff = abs(p - m["Poitrine"]) + abs(t - m["Taille"])
-        if "Bassin" in m: diff += abs(b - m["Bassin"])
-        if diff < score_mini:
-            score_mini, meilleure = diff, nom_t
-    st.sidebar.success(f"Taille recommandée : **{meilleure}**")
-else:
-    st.sidebar.info("Entrez le 'Tour de poitrine' pour voir la taille recommandée.")
+        if diff < score: score, meilleure = diff, nom
+    st.sidebar.success(f"Taille recommandée : {meilleure}")
 
-# --- BOUTON DE SAUVEGARDE ---
-fiche_txt = f"FICHE HOPECORP - {st.session_state.data['Nom Complet']}\n" + "="*30 + "\n"
-for k, v in st.session_state.data.items():
-    fiche_txt += f"{k}: {v}\n"
-
-st.download_button("💾 Télécharger la fiche", fiche_txt, f"Fiche_{st.session_state.data['Nom Complet']}.txt")
+# --- EXPORT ---
+st.divider()
+if st.button("💾 Préparer la fiche pour téléchargement"):
+    fiche = f"HOPECORP - {st.session_state.data['Nom Complet']}\n" + "-"*20 + "\n"
+    for k, v in st.session_state.data.items():
+        if k != "image_modele": fiche += f"{k}: {v}\n"
+    st.download_button("⬇️ Télécharger maintenant", fiche, f"Fiche_{st.session_state.data['Nom Complet']}.txt")
