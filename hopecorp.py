@@ -3,7 +3,13 @@ import datetime
 from fpdf import FPDF
 
 # Configuration
-st.set_page_config(page_title="HOPECORP - Mesures Pro", layout="centered", page_icon="🧵")
+st.set_page_config(page_title="HOPECORP - Atelier Pro", layout="centered", page_icon="🧵")
+
+# --- PARAMÈTRES MÉTRAGE ---
+metrage_base = {
+    "Robe simple": 2.5, "Robe de soirée": 4.0, "Jupe": 1.5,
+    "Pantalon": 2.0, "Veste/Blazer": 2.5, "Chemise/Chemisier": 2.0
+}
 
 # --- TOUTES LES MESURES DÉTAILLÉES ---
 categories = {
@@ -23,48 +29,68 @@ categories = {
         "Carrure devant", "Carrure dos", "Largeur dos", 
         "Largeur d'épaule à épaule", "Profondeur d'encolure"
     ],
-    "4. PROJET": ["Type de vêtement", "Métrage estimé (m)", "Laize tissu (cm)"]
+    "4. PROJET (Photo/Métrage)": []
 }
 
-# --- INITIALISATION & NETTOYAGE CRITIQUE ---
+# --- INITIALISATION ROBUSTE ---
 if "data" not in st.session_state:
     st.session_state.data = {}
 
-# Cette boucle répare les erreurs de type (ex: du texte là où on veut un chiffre)
-for cat, items in categories.items():
+# On s'assure que chaque champ existe pour éviter les erreurs de type (TypeError)
+for items in categories.values():
     for item in items:
         if item not in st.session_state.data:
-            if item in ["Nom Complet", "Notes", "Type de vêtement"]:
-                st.session_state.data[item] = ""
-            elif item == "Date de mesure":
-                st.session_state.data[item] = datetime.date.today()
-            else:
-                st.session_state.data[item] = 0.0
-        else:
-            # Vérification de sécurité pour éviter les plantages st.number_input
-            if item not in ["Nom Complet", "Notes", "Date de mesure", "Type de vêtement"]:
-                try:
-                    st.session_state.data[item] = float(st.session_state.data[item])
-                except:
-                    st.session_state.data[item] = 0.0
+            if item == "Date de mesure": st.session_state.data[item] = datetime.date.today()
+            elif item in ["Nom Complet", "Notes"]: st.session_state.data[item] = ""
+            else: st.session_state.data[item] = 0.0
+
+if "image_modele" not in st.session_state.data: st.session_state.data["image_modele"] = None
 
 # --- INTERFACE ---
 st.title("🧵 HOPECORP")
 page = st.sidebar.radio("Navigation", list(categories.keys()))
 st.header(page)
 
-# Formulaire dynamique
-for label in categories[page]:
-    if label == "Date de mesure":
-        st.session_state.data[label] = st.date_input(label, value=st.session_state.data[label])
-    elif label in ["Notes", "Nom Complet", "Type de vêtement"]:
-        st.session_state.data[label] = st.text_input(label, value=str(st.session_state.data[label]))
-    else:
-        # number_input est très sensible : on s'assure que value est bien un float
-        val_actuelle = float(st.session_state.data.get(label, 0.0))
-        st.session_state.data[label] = st.number_input(label, min_value=0.0, value=val_actuelle, step=0.5)
+if page == "4. PROJET (Photo/Métrage)":
+    # --- SECTION PHOTO ---
+    st.subheader("📸 Modèle")
+    uploaded_file = st.file_uploader("Prendre ou charger une photo", type=["jpg", "png", "jpeg"])
+    if uploaded_file:
+        st.session_state.data["image_modele"] = uploaded_file.read()
+    if st.session_state.data.get("image_modele"):
+        st.image(st.session_state.data["image_modele"], width=300)
+    
+    st.divider()
+    
+    # --- SECTION MÉTRAGE ---
+    st.subheader("📏 Calcul du Métrage")
+    choix = st.selectbox("Type de vêtement", list(metrage_base.keys()))
+    laize = st.select_slider("Laize du tissu (cm)", options=[90, 110, 140, 150], value=140)
+    
+    besoin = metrage_base[choix]
+    if laize < 130: besoin *= 1.3 # Majoration pour tissu étroit
+    
+    st.session_state.data["Projet"] = choix
+    st.session_state.data["Métrage estimé"] = f"{besoin:.1f} m"
+    st.metric("Tissu recommandé", f"{besoin:.1f} mètres")
 
-# --- GÉNÉRATEUR PDF (SANS ERREUR) ---
+else:
+    # --- FORMULAIRE DES MESURES ---
+    for label in categories[page]:
+        if label == "Date de mesure":
+            st.session_state.data[label] = st.date_input(label, value=st.session_state.data[label])
+        elif label in ["Notes", "Nom Complet"]:
+            st.session_state.data[label] = st.text_input(label, value=str(st.session_state.data.get(label, "")))
+        else:
+            # Sécurité number_input pour éviter ValueError
+            val = st.session_state.data.get(label, 0.0)
+            try:
+                f_val = float(val)
+            except:
+                f_val = 0.0
+            st.session_state.data[label] = st.number_input(label, min_value=0.0, value=f_val, step=0.5)
+
+# --- GÉNÉRATEUR PDF PROFESSIONNEL ---
 def generate_pdf(data):
     try:
         pdf = FPDF()
@@ -76,29 +102,27 @@ def generate_pdf(data):
         pdf.set_font("Arial", "B", 11)
         pdf.cell(0, 8, f"CLIENT : {str(data.get('Nom Complet', '-'))}", ln=True)
         pdf.cell(0, 8, f"DATE : {str(data.get('Date de mesure', '-'))}", ln=True)
+        if "Projet" in data:
+            pdf.cell(0, 8, f"PROJET : {data['Projet']} (Besoin: {data.get('Métrage estimé', '-')})", ln=True)
         pdf.ln(5)
         
-        pdf.set_font("Arial", "", 10)
+        pdf.set_font("Arial", "", 9)
+        # Liste des mesures dans le PDF
         for k, v in data.items():
-            if k not in ["Nom Complet", "Date de mesure"]:
-                # Affichage propre des mesures remplies
-                txt_v = str(v) if v not in [0.0, "", 0] else "-"
+            if k not in ["Nom Complet", "Date de mesure", "image_modele", "Projet", "Métrage estimé"]:
+                txt_v = f"{v} cm" if (isinstance(v, float) and v > 0) else "-"
                 pdf.cell(90, 7, f"{str(k)}", border=1)
                 pdf.cell(40, 7, f"{txt_v}", border=1, ln=True)
         return pdf.output()
-    except:
-        return None
+    except: return None
 
 # --- BOUTON DE TÉLÉCHARGEMENT ---
 st.sidebar.divider()
-try:
-    pdf_out = generate_pdf(st.session_state.data)
-    if pdf_out:
-        st.sidebar.download_button(
-            "📥 Télécharger PDF", 
-            data=bytes(pdf_out), 
-            file_name=f"Fiche_{st.session_state.data['Nom Complet']}.pdf", 
-            mime="application/pdf"
-        )
-except:
-    st.sidebar.warning("Remplissez le nom pour le PDF")
+pdf_file = generate_pdf(st.session_state.data)
+if pdf_file:
+    st.sidebar.download_button(
+        "📥 Télécharger PDF Complet", 
+        data=bytes(pdf_file), 
+        file_name=f"Fiche_{st.session_state.data.get('Nom Complet', 'Client')}.pdf", 
+        mime="application/pdf"
+    )
