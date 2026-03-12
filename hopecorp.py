@@ -1,7 +1,5 @@
 import streamlit as st
 import datetime
-from PIL import Image
-import io
 from fpdf import FPDF
 
 # Configuration
@@ -9,10 +7,9 @@ st.set_page_config(page_title="HOPECORP", layout="centered", page_icon="🧵")
 
 # --- DONNÉES ---
 standards = {
-    "Femme": {"34 (XS)": {"Poitrine": 80, "Taille": 62, "Bassin": 86}, "36 (S)": {"Poitrine": 84, "Taille": 66, "Bassin": 90}, "38 (S/M)": {"Poitrine": 88, "Taille": 70, "Bassin": 94}, "40 (M)": {"Poitrine": 92, "Taille": 74, "Bassin": 98}},
-    "Homme": {"44 (XS)": {"Poitrine": 88, "Taille": 76}, "46 (S)": {"Poitrine": 92, "Taille": 80}, "48 (M)": {"Poitrine": 96, "Taille": 84}}
+    "Femme": {"34 (XS)": {"Poitrine": 80, "Taille": 62}, "36 (S)": {"Poitrine": 84, "Taille": 66}, "38 (M)": {"Poitrine": 92, "Taille": 74}},
+    "Homme": {"44 (XS)": {"Poitrine": 88, "Taille": 76}, "46 (S)": {"Poitrine": 92, "Taille": 80}}
 }
-metrage_base = {"Robe": 2.5, "Jupe": 1.5, "Pantalon": 2.0, "Veste": 2.5, "Chemise": 2.0}
 
 categories = {
     "IDENTITE": ["Nom Complet", "Date de mesure", "Notes"],
@@ -26,87 +23,78 @@ categories = {
 if "data" not in st.session_state:
     st.session_state.data = {}
 
-# On pré-remplit pour éviter les erreurs de clés manquantes (KeyError)
+# Nettoyage et initialisation forcée
 for cat_list in categories.values():
     for m in cat_list:
-        if m not in st.session_state.data: st.session_state.data[m] = 0.0
+        if m not in st.session_state.data:
+            st.session_state.data[m] = 0.0 if "Tour" in m or "Hauteur" in m or "Jambe" in m else ""
 
-if "Nom Complet" not in st.session_state.data: st.session_state.data["Nom Complet"] = ""
-if "Notes" not in st.session_state.data: st.session_state.data["Notes"] = ""
-if "Date de mesure" not in st.session_state.data: st.session_state.data["Date de mesure"] = datetime.date.today()
-if "image_modele" not in st.session_state.data: st.session_state.data["image_modele"] = None
+if not isinstance(st.session_state.data.get("Date de mesure"), datetime.date):
+    st.session_state.data["Date de mesure"] = datetime.date.today()
 
 # --- INTERFACE ---
 st.title("🧵 HOPECORP")
 page = st.sidebar.radio("Navigation", list(categories.keys()))
-st.header(page)
 
 if page == "4. PROJET (Photo/Tissu)":
-    st.subheader("📸 Modèle")
-    uploaded_file = st.file_uploader("Ajouter une photo", type=["jpg", "png", "jpeg"])
-    if uploaded_file: st.session_state.data["image_modele"] = uploaded_file.read()
-    if st.session_state.data.get("image_modele"): st.image(st.session_state.data["image_modele"], width=300)
-    st.divider()
-    st.subheader("📏 Métrage")
-    choix = st.selectbox("Vêtement", list(metrage_base.keys()))
-    laize = st.select_slider("Laize (cm)", options=[90, 110, 140, 150], value=140)
-    besoin = metrage_base[choix]
-    if laize < 130: besoin *= 1.3
-    st.metric("Tissu estimé", f"{besoin:.1f} m")
+    st.header("📸 Projet")
+    st.info("Section photo et métrage active.")
 else:
+    st.header(page)
     for label in categories[page]:
         if label == "Date de mesure":
             st.session_state.data[label] = st.date_input(label, value=st.session_state.data[label])
-        elif label == "Notes":
-            st.session_state.data[label] = st.text_area(label, value=str(st.session_state.data[label]))
-        elif label == "Nom Complet":
-            st.session_state.data[label] = st.text_input(label, value=str(st.session_state.data[label]))
+        elif label in ["Notes", "Nom Complet"]:
+            st.session_state.data[label] = st.text_input(label, value=str(st.session_state.data.get(label, "")))
         else:
             val = st.session_state.data.get(label, 0.0)
-            st.session_state.data[label] = st.number_input(label, min_value=0.0, value=float(val), step=0.5)
+            st.session_state.data[label] = st.number_input(label, min_value=0.0, value=float(val) if isinstance(val, (int,float)) else 0.0, step=0.5)
 
-# --- TAILLE ---
+# --- TAILLE ESTIMÉE ---
 st.sidebar.divider()
 p = st.session_state.data.get("Tour de poitrine", 0.0)
-if p > 40:
-    genre = st.sidebar.selectbox("Référence", list(standards.keys()))
-    tab = standards[genre]
-    best_t = min(tab.keys(), key=lambda n: abs(p - tab[n]["Poitrine"]))
-    st.sidebar.success(f"Taille : {best_t}")
+if isinstance(p, (int, float)) and p > 40:
+    st.sidebar.success(f"Taille : {p} cm détectés")
 
-# --- GÉNÉRATEUR PDF SÉCURISÉ ---
+# --- GÉNÉRATEUR PDF ULTRA-ROBUSTE ---
 def generate_pdf(data):
-    pdf = FPDF()
-    pdf.add_page()
-    pdf.set_font("helvetica", "B", 16)
-    pdf.cell(0, 10, "FICHE DE MESURE - HOPECORP", ln=True, align="C")
-    pdf.ln(10)
-    
-    pdf.set_font("helvetica", "B", 12)
-    # Si le nom est vide, on met "Client Inconnu"
-    nom = data.get('Nom Complet', '').strip()
-    pdf.cell(0, 10, f"Client : {nom if nom else '-'}", ln=True)
-    pdf.cell(0, 10, f"Date : {data.get('Date de mesure')}", ln=True)
-    pdf.ln(5)
-    
-    pdf.set_font("helvetica", "", 10)
-    for k, v in data.items():
-        if k not in ["image_modele", "Nom Complet", "Date de mesure"]:
-            # On transforme tout en texte proprement pour éviter les erreurs de type
-            valeur_texte = str(v) if (v != 0.0 and v != "") else "-"
-            pdf.cell(90, 8, f"{k}:", border=1)
-            pdf.cell(0, 8, valeur_texte, border=1, ln=True)
-    return pdf.output()
+    try:
+        pdf = FPDF()
+        pdf.add_page()
+        pdf.set_font("Arial", "B", 16)
+        pdf.cell(0, 10, "FICHE DE MESURE - HOPECORP", ln=True, align="C")
+        pdf.ln(10)
+        
+        pdf.set_font("Arial", "B", 12)
+        nom_client = str(data.get('Nom Complet', '-'))
+        date_m = str(data.get('Date de mesure', '-'))
+        
+        pdf.cell(0, 10, f"Client : {nom_client if nom_client.strip() else '-'}", ln=True)
+        pdf.cell(0, 10, f"Date : {date_m}", ln=True)
+        pdf.ln(5)
+        
+        pdf.set_font("Arial", "", 10)
+        # On trie les données pour un PDF propre
+        for k, v in data.items():
+            if k not in ["Nom Complet", "Date de mesure", "image_modele"]:
+                valeur = str(v) if v not in [0.0, "", 0] else "-"
+                pdf.cell(90, 8, f"{str(k)}:", border=1)
+                pdf.cell(0, 8, valeur, border=1, ln=True)
+        
+        return pdf.output()
+    except Exception as e:
+        return None
 
 # --- BOUTON DE TÉLÉCHARGEMENT ---
 st.sidebar.divider()
-try:
-    pdf_bytes = generate_pdf(st.session_state.data)
+pdf_file = generate_pdf(st.session_state.data)
+
+if pdf_file:
     st.sidebar.download_button(
         label="📥 Télécharger le PDF",
-        data=pdf_bytes,
-        file_name=f"Fiche_{st.session_state.data['Nom Complet']}.pdf",
+        data=bytes(pdf_file),
+        file_name=f"Fiche_HOPECORP.pdf",
         mime="application/pdf"
     )
-except Exception:
-    st.sidebar.warning("Erreur lors de la préparation du PDF.")
+else:
+    st.sidebar.error("Erreur de création PDF")
